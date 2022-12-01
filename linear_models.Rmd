@@ -75,10 +75,10 @@ fit %>%
 ```
 
 
-Let's change reference category.
+Let's change the reference category.
 
 ```{r}
-fit = 
+fit2 =  
   nyc_airbnb %>% 
   mutate(
     borough = fct_infreq(borough)
@@ -90,5 +90,41 @@ fit =
   ) %>% 
   select(term, estimate, p.value) %>% 
   knitr::kable(digits = 2)
+```
+
+
+## Diagnostics
+
+```{r residual}
+modelr::add_residuals(nyc_airbnb, fit) %>% 
+  ggplot(aes(x = stars, y = resid)) +
+  geom_point()
+```
+
+Is there constant variance? No, constant variance assumption is not satisfied here. Doesn't mean our regression is invalid, but need to worry about this if doing hypotheses testing, or want to exclude outliers. 
+
+```{r}
+nyc_airbnb %>% 
+  modelr::add_residuals(fit) %>% 
+  ggplot(aes(x = borough, y = resid)) +
+  geom_violin() +
+  ylim(-250, 250)
+```
+
+Assupmtions are not met here, but sample size is big.
+
+## Hypothesis testing
+
+one coefficient (let's say `stars`).
+
+```{r}
+fit %>% 
+  broom::tidy()
+
+fit_null = lm(price ~ stars, data = nyc_airbnb)
+fit_alt = lm(price ~ stars + borough, data = nyc_airbnb)
+
+anova(fit_null, fit_alt) %>% 
+  broom::tidy()
 ```
 

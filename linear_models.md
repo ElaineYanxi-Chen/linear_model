@@ -131,10 +131,10 @@ fit %>%
     ##     <dbl>
     ## 1 404237.
 
-Let’s change reference category.
+Let’s change the reference category.
 
 ``` r
-fit = 
+fit2 =  
   nyc_airbnb %>% 
   mutate(
     borough = fct_infreq(borough)
@@ -147,3 +147,63 @@ fit =
   select(term, estimate, p.value) %>% 
   knitr::kable(digits = 2)
 ```
+
+## Diagnostics
+
+``` r
+modelr::add_residuals(nyc_airbnb, fit) %>% 
+  ggplot(aes(x = stars, y = resid)) +
+  geom_point()
+```
+
+<img src="linear_models_files/figure-gfm/residual-1.png" width="90%" />
+
+Is there constant variance? No, constant variance assumption is not
+satisfied here. Doesn’t mean our regression is invalid, but need to
+worry about this if doing hypotheses testing, or want to exclude
+outliers.
+
+``` r
+nyc_airbnb %>% 
+  modelr::add_residuals(fit) %>% 
+  ggplot(aes(x = borough, y = resid)) +
+  geom_violin() +
+  ylim(-250, 250)
+```
+
+<img src="linear_models_files/figure-gfm/unnamed-chunk-4-1.png" width="90%" />
+
+Assupmtions are not met here, but sample size is big.
+
+## Hypothesis testing
+
+one coefficient (let’s say `stars`).
+
+``` r
+fit %>% 
+  broom::tidy()
+```
+
+    ## # A tibble: 5 × 5
+    ##   term             estimate std.error statistic  p.value
+    ##   <chr>               <dbl>     <dbl>     <dbl>    <dbl>
+    ## 1 (Intercept)         -70.4     14.0      -5.02 5.14e- 7
+    ## 2 stars                32.0      2.53     12.7  1.27e-36
+    ## 3 boroughBrooklyn      40.5      8.56      4.73 2.23e- 6
+    ## 4 boroughManhattan     90.3      8.57     10.5  6.64e-26
+    ## 5 boroughQueens        13.2      9.06      1.46 1.45e- 1
+
+``` r
+fit_null = lm(price ~ stars, data = nyc_airbnb)
+fit_alt = lm(price ~ stars + borough, data = nyc_airbnb)
+
+anova(fit_null, fit_alt) %>% 
+  broom::tidy()
+```
+
+    ## # A tibble: 2 × 7
+    ##   term                    df.residual       rss    df   sumsq stati…¹    p.value
+    ##   <chr>                         <dbl>     <dbl> <dbl>   <dbl>   <dbl>      <dbl>
+    ## 1 price ~ stars                 30528    1.03e9    NA NA          NA  NA        
+    ## 2 price ~ stars + borough       30525    1.01e9     3  2.53e7    256.  7.84e-164
+    ## # … with abbreviated variable name ¹​statistic
