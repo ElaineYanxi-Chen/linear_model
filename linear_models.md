@@ -120,6 +120,17 @@ fit %>%
 | Borough: Manhattan |    90.25 |    0.00 |
 | Borough: Queens    |    13.21 |    0.15 |
 
+``` r
+fit %>% 
+  broom::glance() %>% 
+  select(AIC)
+```
+
+    ## # A tibble: 1 × 1
+    ##       AIC
+    ##     <dbl>
+    ## 1 404237.
+
 Let’s change reference category.
 
 ``` r

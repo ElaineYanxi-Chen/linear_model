@@ -68,6 +68,10 @@ fit %>%
   ) %>% 
   select(term, estimate, p.value) %>% 
   knitr::kable(digits = 2)
+
+fit %>% 
+  broom::glance() %>% 
+  select(AIC)
 ```
 
 
