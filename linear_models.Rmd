@@ -83,7 +83,9 @@ fit2 =
   mutate(
     borough = fct_infreq(borough)
   ) %>% 
-  lm(price ~ stars + borough, data = .) %>% 
+  lm(price ~ stars + borough, data = .) 
+
+fit2 %>% 
   broom::tidy() %>% 
   mutate(
     term = str_replace(term, "borough", "Borough: ")
@@ -101,6 +103,13 @@ modelr::add_residuals(nyc_airbnb, fit) %>%
   geom_point()
 ```
 
+Could also add predictions.
+
+```{r}
+modelr::add_predictions(nyc_airbnb, fit)
+```
+
+
 Is there constant variance? No, constant variance assumption is not satisfied here. Doesn't mean our regression is invalid, but need to worry about this if doing hypotheses testing, or want to exclude outliers. 
 
 ```{r}
@@ -111,11 +120,13 @@ nyc_airbnb %>%
   ylim(-250, 250)
 ```
 
-Assupmtions are not met here, but sample size is big.
+Assumptions are not met here, but sample size is big.
 
 ## Hypothesis testing
 
 one coefficient (let's say `stars`).
+
+Testing using nested models. Below only works for nested models and comparing non-nested models is different and requires other methods.
 
 ```{r}
 fit %>% 
@@ -148,8 +159,13 @@ So...can we fit models by borough...?
 
 Using the `nest` function, we could split up the data by boroughs.
 
+Use `nest` to create a list column containing datasets and fit separate models to each.
+
+This approach is kind of an alternative to interactions, since we have to really think through the interpretation for interactions.
+
 ```{r}
-nyc_airbnb %>% 
+nest_lm_res =
+  nyc_airbnb %>% 
   nest(df = -borough) %>% 
   mutate(
     models = map(.x = df, ~lm(price ~ stars + room_type, data = .x)),
@@ -159,6 +175,18 @@ nyc_airbnb %>%
   unnest(results)
 ```
 
+We can show the results of the above approach as such.
+
+```{r}
+nest_lm_res %>% 
+  select(borough, term, estimate) %>% 
+  mutate(term = fct_inorder(term)) %>% 
+  pivot_wider(
+    names_from = term, values_from = estimate) %>% 
+  knitr::kable(digits = 3)
+```
+
+These have a tradeoff: stratified models make it easy to interpret covariate effects in each stratum, but don’t provide a mechanism for assessing the significance of differences across strata.
 
 Quick double check...?
 
@@ -170,3 +198,78 @@ nyc_airbnb %>%
 ```
 
 Can just change what we filter for if we are only interested in one boroughs. But the earlier approach is much easier to get results for all boroughs without repeating the same procedures 4 times. 
+
+More extreme example from the course website, assessing neighbourhood effects in Manhattan.
+
+```{r}
+manhattan_airbnb =
+  nyc_airbnb %>% 
+  filter(borough == "Manhattan")
+
+manhattan_nest_lm_res =
+  manhattan_airbnb %>% 
+  nest(data = -neighbourhood) %>% 
+  mutate(
+    models = map(data, ~lm(price ~ stars + room_type, data = .x)),
+    results = map(models, broom::tidy)) %>% 
+  select(-data, -models) %>% 
+  unnest(results)
+```
+
+```{r}
+manhattan_nest_lm_res %>% 
+  filter(str_detect(term, "room_type")) %>% 
+  ggplot(aes(x = neighbourhood, y = estimate)) + 
+  geom_point() + 
+  facet_wrap(~term) + 
+  theme(axis.text.x = element_text(angle = 80, hjust = 1))
+```
+
+Here it's a better idea to use random intercepts and slopes for each neighbourhood. This is a mixed model approach. 
+
+```{r eval = FALSE}
+manhattan_airbnb %>% 
+  lme4::lmer(price ~ stars + room_type + (1 + room_type | neighbourhood), data = .) %>% 
+  broom.mixed::tidy()
+```
+
+
+## Binary outcomes and logistic regression
+
+```{r}
+baltimore_df = 
+  read_csv("data/homicide-data.csv") %>% 
+  filter(city == "Baltimore") %>% 
+  mutate(
+    resolved = as.numeric(disposition == "Closed by arrest"),
+    victim_age = as.numeric(victim_age),
+    victim_race = fct_relevel(victim_race, "White")) %>% 
+  select(resolved, victim_age, victim_race, victim_sex)
+```
+
+Interesting and much better way to assign resolved status here.
+
+Using logistic regression, could fit logistic regression for binary "resolved" outcome. 
+
+```{r}
+fit_logistic = 
+  baltimore_df %>% 
+  glm(resolved ~ victim_age + victim_race + victim_sex, data = ., family = binomial()) 
+```
+
+```{r}
+fit_logistic %>% 
+  broom::tidy() %>% 
+  mutate(OR = exp(estimate)) %>%
+  select(term, log_OR = estimate, OR, p.value) %>% 
+  knitr::kable(digits = 3)
+```
+
+Transform log odds to probabilities for each subject.
+
+```{r}
+baltimore_df %>% 
+  modelr::add_predictions(fit_logistic) %>% 
+  mutate(fitted_prob = boot::inv.logit(pred))
+```
+
