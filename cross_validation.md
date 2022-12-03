@@ -1,7 +1,7 @@
 Cross Validation
 ================
 Elaine Yanxi Chen
-2022-12-01
+2022-12-03
 
 ## Packages and settings
 
@@ -30,11 +30,15 @@ options(
 
 scale_colour_discrete = scale_colour_viridis_d
 scale_fill_discrete = scale_fill_viridis_d
+
+set.seed(1)
 ```
 
 ## Step one
 
 Cross validation “by hand” on simulated data.
+
+We first generate a non-linear model by hand.
 
 ``` r
 nonlin_df = 
@@ -51,7 +55,10 @@ nonlin_df %>%
 
 <img src="cross_validation_files/figure-gfm/unnamed-chunk-1-1.png" width="90%" />
 
-Let’s get this by hand.
+Let’s get this by hand.Split the data into training and test sets using
+`anti_join` and replot showing the split. We want to use the training
+data in black to build candidate models, then see how these models
+predict in the testing data in red.
 
 ``` r
 train_df = sample_n(nonlin_df, 80)
@@ -68,6 +75,9 @@ train_df %>%
 <img src="cross_validation_files/figure-gfm/unnamed-chunk-3-1.png" width="90%" />
 
 Let’s try to fit three models.
+
+Using `mgcv::gam` for non-linear models, drawing smooth lines through
+data clouds, and can control how smooth we want the fit to be.
 
 ``` r
 linear_mod = lm(y ~ x, data = train_df)
@@ -107,6 +117,27 @@ train_df %>%
 
 <img src="cross_validation_files/figure-gfm/unnamed-chunk-5-3.png" width="90%" />
 
+Add predictions with `modelr::gather_predictions` function for several
+models to a dataframe and then pivot so that the result is tidy.
+
+``` r
+train_df %>% 
+  gather_predictions(linear_mod, smooth_mod, wiggly_mod) %>% 
+  mutate(model = fct_inorder(model)) %>% 
+  ggplot(aes(x = x, y = y)) +
+  geom_point() +
+  geom_line(aes(y = pred), colour = "red") +
+  facet_wrap(~ model)
+```
+
+<img src="cross_validation_files/figure-gfm/unnamed-chunk-6-1.png" width="90%" />
+
+Linear model is too simple and will never capture the true relationship
+between variables no matter what trianing data we use, standard smooth
+fit is pretty good, wiggly fit is too complex, chasing datapoints, vary
+a lot from one training dataset to the next, consistently wrong due to
+its complexity, highly variable
+
 Let’s make predictions and compute RMSEs.
 
 ``` r
@@ -114,48 +145,56 @@ test_df %>% add_predictions(linear_mod)
 ```
 
     ## # A tibble: 20 × 4
-    ##       id      x       y     pred
-    ##    <int>  <dbl>   <dbl>    <dbl>
-    ##  1     1 0.336   0.373   0.299  
-    ##  2     8 0.631  -0.0400 -0.902  
-    ##  3    10 0.831  -1.52   -1.72   
-    ##  4    11 0.671   0.0129 -1.07   
-    ##  5    14 0.104   1.08    1.24   
-    ##  6    16 0.993  -4.01   -2.38   
-    ##  7    17 0.916  -2.98   -2.07   
-    ##  8    19 0.737  -0.587  -1.34   
-    ##  9    21 0.694  -0.905  -1.16   
-    ## 10    25 0.398   0.534   0.0436 
-    ## 11    29 0.601   0.269  -0.780  
-    ## 12    38 0.823  -1.40   -1.69   
-    ## 13    41 0.631  -0.522  -0.903  
-    ## 14    52 0.555   0.671  -0.593  
-    ## 15    54 0.413   0.769  -0.0159 
-    ## 16    60 0.822  -1.53   -1.68   
-    ## 17    72 0.0547  0.743   1.44   
-    ## 18    88 0.407   1.46    0.00651
-    ## 19    90 0.597   0.105  -0.764  
-    ## 20    91 0.254   0.992   0.632
+    ##       id      x      y     pred
+    ##    <int>  <dbl>  <dbl>    <dbl>
+    ##  1     8 0.661  -0.615 -0.735  
+    ##  2    18 0.992  -3.35  -2.05   
+    ##  3    21 0.935  -2.89  -1.82   
+    ##  4    22 0.212   0.710  1.05   
+    ##  5    30 0.340   0.807  0.537  
+    ##  6    36 0.668  -0.258 -0.766  
+    ##  7    46 0.789  -1.23  -1.25   
+    ##  8    49 0.732  -1.24  -1.02   
+    ##  9    52 0.861  -2.14  -1.53   
+    ## 10    55 0.0707  0.278  1.61   
+    ## 11    59 0.662  -0.195 -0.740  
+    ## 12    63 0.459   1.18   0.0659 
+    ## 13    69 0.0842  0.683  1.55   
+    ## 14    74 0.334   0.935  0.563  
+    ## 15    75 0.476   0.659 -0.00274
+    ## 16    76 0.892  -2.29  -1.65   
+    ## 17    78 0.390   0.908  0.340  
+    ## 18    83 0.400   1.06   0.300  
+    ## 19    89 0.245   0.775  0.914  
+    ## 20    91 0.240   0.389  0.937
 
 ``` r
 rmse(linear_mod, test_df)
 ```
 
-    ## [1] 0.8193661
+    ## [1] 0.7052956
 
 ``` r
 rmse(smooth_mod, test_df)
 ```
 
-    ## [1] 0.3241096
+    ## [1] 0.2221774
 
 ``` r
 rmse(wiggly_mod, test_df)
 ```
 
-    ## [1] 0.3829915
+    ## [1] 0.289051
 
 ## Can we iterate…?
+
+We needed to convert output from `crossv_mc` to a tibble because it is
+not compatible with `gam`. If all we want is models from `lm` fit then
+this step can be skipped.
+
+Here, we are fitting each training dataset through the three models:
+linear, smooth, and wiggly.And then we will obtain the RMSEs by fitting
+each of the model through the testing dataset.
 
 ``` r
 cv_df = 
@@ -165,18 +204,18 @@ cv_df %>% pull(train) %>% .[[1]] %>% as_tibble()
 ```
 
     ## # A tibble: 79 × 3
-    ##       id     x       y
-    ##    <int> <dbl>   <dbl>
-    ##  1     3 0.324  0.747 
-    ##  2     4 0.204  0.539 
-    ##  3     5 0.265  0.759 
-    ##  4     7 0.670 -0.161 
-    ##  5     8 0.631 -0.0400
-    ##  6     9 0.816 -1.42  
-    ##  7    10 0.831 -1.52  
-    ##  8    11 0.671  0.0129
-    ##  9    12 0.673 -0.441 
-    ## 10    13 0.107  0.620 
+    ##       id      x       y
+    ##    <int>  <dbl>   <dbl>
+    ##  1     1 0.266   1.11  
+    ##  2     2 0.372   0.764 
+    ##  3     3 0.573   0.358 
+    ##  4     4 0.908  -3.04  
+    ##  5     6 0.898  -1.99  
+    ##  6     7 0.945  -3.27  
+    ##  7     8 0.661  -0.615 
+    ##  8     9 0.629   0.0878
+    ##  9    10 0.0618  0.392 
+    ## 10    11 0.206   1.63  
     ## # … with 69 more rows
 
 ``` r
@@ -198,7 +237,7 @@ cv_df =
   )
 ```
 
-Make a box plot…
+Make a box plot… Compare these models using the RMSE.
 
 ``` r
 cv_df %>% 
@@ -213,7 +252,7 @@ cv_df %>%
   geom_boxplot()
 ```
 
-<img src="cross_validation_files/figure-gfm/unnamed-chunk-8-1.png" width="90%" />
+<img src="cross_validation_files/figure-gfm/unnamed-chunk-9-1.png" width="90%" />
 
 ## Try it on a real dataset
 
@@ -235,12 +274,18 @@ growth_df %>%
   geom_point(alpha = 0.3)
 ```
 
-<img src="cross_validation_files/figure-gfm/unnamed-chunk-10-1.png" width="90%" />
+<img src="cross_validation_files/figure-gfm/unnamed-chunk-11-1.png" width="90%" />
+
+The plot suggest some non-linearity, especially at the low end of the
+weight distribution. The three models we will try here are the linear
+fit, a piecewise linear fit, and a smooth fit using `gam`.
 
 Brief aside on piecewise linear models.
 
+Here we add a “change point term” to the dataframe.
+
 ``` r
-growth_df =
+child_growth =
   growth_df %>% 
   mutate(
     weight_pwl = (weight > 7) * (weight - 7)
@@ -248,44 +293,58 @@ growth_df =
 ```
 
 ``` r
-linear_model = lm(armc ~ weight, data = growth_df)
-pwl_model = lm(armc ~ weight + weight_pwl, data = growth_df)
-smooth_model = mgcv::gam(armc ~ s(weight), data = growth_df)
+linear_model = lm(armc ~ weight, data = child_growth)
+pwl_model = lm(armc ~ weight + weight_pwl, data = child_growth)
+smooth_model = mgcv::gam(armc ~ s(weight), data = child_growth)
 ```
 
+Plotting the three models for an intuition for goodness of fit.
+
 ``` r
-growth_df %>% 
+child_growth %>% 
+  gather_predictions(linear_model, pwl_model, smooth_model) %>% 
+  mutate(model = fct_inorder(model)) %>% 
+  ggplot(aes(x = weight, y = armc)) + 
+  geom_point(alpha = .5) +
+  geom_line(aes(y = pred), colour = "red") + 
+  facet_grid(~model)
+```
+
+<img src="cross_validation_files/figure-gfm/unnamed-chunk-14-1.png" width="90%" />
+
+``` r
+child_growth %>% 
   add_predictions(pwl_model) %>% 
   ggplot(aes(x = weight, y = armc)) +
   geom_point(alpha = 0.3) +
   geom_line(aes(y = pred), colour = "red")
 ```
 
-<img src="cross_validation_files/figure-gfm/unnamed-chunk-13-1.png" width="90%" />
+<img src="cross_validation_files/figure-gfm/unnamed-chunk-15-1.png" width="90%" />
 
 ``` r
-growth_df %>% 
+child_growth %>% 
   add_predictions(linear_model) %>% 
   ggplot(aes(x = weight, y = armc)) +
   geom_point(alpha = 0.3) +
   geom_line(aes(y = pred), colour = "red")
 ```
 
-<img src="cross_validation_files/figure-gfm/unnamed-chunk-13-2.png" width="90%" />
+<img src="cross_validation_files/figure-gfm/unnamed-chunk-15-2.png" width="90%" />
 
 ``` r
-growth_df %>% 
+child_growth %>% 
   add_predictions(smooth_model) %>% 
   ggplot(aes(x = weight, y = armc)) +
   geom_point(alpha = 0.3) +
   geom_line(aes(y = pred), colour = "red")
 ```
 
-<img src="cross_validation_files/figure-gfm/unnamed-chunk-13-3.png" width="90%" />
+<img src="cross_validation_files/figure-gfm/unnamed-chunk-15-3.png" width="90%" />
 
 ``` r
 cv_df = 
-  crossv_mc(growth_df, 100) %>% 
+  crossv_mc(child_growth, 100) %>% 
   mutate(
     train = map(train, as_tibble),
     test = map(test, as_tibble),
@@ -320,4 +379,19 @@ cv_df %>%
   geom_boxplot()
 ```
 
-<img src="cross_validation_files/figure-gfm/unnamed-chunk-15-1.png" width="90%" />
+<img src="cross_validation_files/figure-gfm/unnamed-chunk-17-1.png" width="90%" />
+
+``` r
+cv_df %>% 
+  select(starts_with("rmse")) %>% 
+  pivot_longer(
+    everything(),
+    names_to = "model",
+    values_to = "rmse",
+    names_prefix = "rmse_"
+  ) %>% 
+  ggplot(aes(x = model, y = rmse)) +
+  geom_violin()
+```
+
+<img src="cross_validation_files/figure-gfm/unnamed-chunk-18-1.png" width="90%" />

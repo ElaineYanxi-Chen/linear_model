@@ -32,12 +32,16 @@ options(
 
 scale_colour_discrete = scale_colour_viridis_d
 scale_fill_discrete = scale_fill_viridis_d
+
+set.seed(1)
 ```
 
 
 ## Step one
 
 Cross validation "by hand" on simulated data.
+
+We first generate a non-linear model by hand.
 
 ```{r}
 nonlin_df = 
@@ -53,7 +57,7 @@ nonlin_df %>%
 ```
 
 
-Let's get this by hand.
+Let's get this by hand.Split the data into training and test sets using `anti_join` and replot showing the split. We want to use the training data in black to build candidate models, then see how these models predict in the testing data in red.
 
 ```{r}
 train_df = sample_n(nonlin_df, 80)
@@ -69,6 +73,8 @@ train_df %>%
 
 
 Let's try to fit three models. 
+
+Using `mgcv::gam` for non-linear models, drawing smooth lines through data clouds, and can control how smooth we want the fit to be.
 
 ```{r}
 linear_mod = lm(y ~ x, data = train_df)
@@ -99,6 +105,19 @@ train_df %>%
   geom_line(aes(y = pred), colour = "red")
 ```
 
+Add predictions with `modelr::gather_predictions` function for several models to a dataframe and then pivot so that the result is tidy.
+
+```{r}
+train_df %>% 
+  gather_predictions(linear_mod, smooth_mod, wiggly_mod) %>% 
+  mutate(model = fct_inorder(model)) %>% 
+  ggplot(aes(x = x, y = y)) +
+  geom_point() +
+  geom_line(aes(y = pred), colour = "red") +
+  facet_wrap(~ model)
+```
+
+Linear model is too simple and will never capture the true relationship between variables no matter what trianing data we use, standard smooth fit is pretty good, wiggly fit is too complex, chasing datapoints, vary a lot from one training dataset to the next, consistently wrong due to its complexity, highly variable
 
 Let's make predictions and compute RMSEs.
 
@@ -112,6 +131,10 @@ rmse(wiggly_mod, test_df)
 
 
 ## Can we iterate...?
+
+We needed to convert output from `crossv_mc` to a tibble because it is not compatible with `gam`. If all we want is models from `lm` fit then this step can be skipped. 
+
+Here, we are fitting each training dataset through the three models: linear, smooth, and wiggly.And then we will obtain the RMSEs by fitting each of the model through the testing dataset.
 
 ```{r}
 cv_df = 
@@ -139,6 +162,7 @@ cv_df =
 
 
 Make a box plot...
+Compare these models using the RMSE. 
 
 ```{r}
 cv_df %>% 
@@ -167,11 +191,14 @@ growth_df %>%
   geom_point(alpha = 0.3)
 ```
 
+The plot suggest some non-linearity, especially at the low end of the weight distribution. The three models we will try here are the linear fit, a piecewise linear fit, and a smooth fit using `gam`.
 
 Brief aside on piecewise linear models.
 
+Here we add a "change point term" to the dataframe.
+
 ```{r}
-growth_df =
+child_growth =
   growth_df %>% 
   mutate(
     weight_pwl = (weight > 7) * (weight - 7)
@@ -180,26 +207,37 @@ growth_df =
 
 
 ```{r}
-linear_model = lm(armc ~ weight, data = growth_df)
-pwl_model = lm(armc ~ weight + weight_pwl, data = growth_df)
-smooth_model = mgcv::gam(armc ~ s(weight), data = growth_df)
+linear_model = lm(armc ~ weight, data = child_growth)
+pwl_model = lm(armc ~ weight + weight_pwl, data = child_growth)
+smooth_model = mgcv::gam(armc ~ s(weight), data = child_growth)
 ```
 
+Plotting the three models for an intuition for goodness of fit.
 
 ```{r}
-growth_df %>% 
+child_growth %>% 
+  gather_predictions(linear_model, pwl_model, smooth_model) %>% 
+  mutate(model = fct_inorder(model)) %>% 
+  ggplot(aes(x = weight, y = armc)) + 
+  geom_point(alpha = .5) +
+  geom_line(aes(y = pred), colour = "red") + 
+  facet_grid(~model)
+```
+
+```{r}
+child_growth %>% 
   add_predictions(pwl_model) %>% 
   ggplot(aes(x = weight, y = armc)) +
   geom_point(alpha = 0.3) +
   geom_line(aes(y = pred), colour = "red")
 
-growth_df %>% 
+child_growth %>% 
   add_predictions(linear_model) %>% 
   ggplot(aes(x = weight, y = armc)) +
   geom_point(alpha = 0.3) +
   geom_line(aes(y = pred), colour = "red")
 
-growth_df %>% 
+child_growth %>% 
   add_predictions(smooth_model) %>% 
   ggplot(aes(x = weight, y = armc)) +
   geom_point(alpha = 0.3) +
@@ -209,7 +247,7 @@ growth_df %>%
 
 ```{r}
 cv_df = 
-  crossv_mc(growth_df, 100) %>% 
+  crossv_mc(child_growth, 100) %>% 
   mutate(
     train = map(train, as_tibble),
     test = map(test, as_tibble),
@@ -243,5 +281,19 @@ cv_df %>%
   ) %>% 
   ggplot(aes(x = model, y = rmse)) +
   geom_boxplot()
+```
+
+
+```{r}
+cv_df %>% 
+  select(starts_with("rmse")) %>% 
+  pivot_longer(
+    everything(),
+    names_to = "model",
+    values_to = "rmse",
+    names_prefix = "rmse_"
+  ) %>% 
+  ggplot(aes(x = model, y = rmse)) +
+  geom_violin()
 ```
 
